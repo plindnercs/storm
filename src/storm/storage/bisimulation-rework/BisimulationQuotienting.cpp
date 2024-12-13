@@ -26,7 +26,6 @@ namespace storm {
                     }
                     // Get the states associated with the current label
                     const storm::storage::BitVector& currentLabelStates = model.getStates(label);
-y
 
                     if (currentLabelStates.empty()) {
                       continue;
@@ -47,16 +46,18 @@ y
                       if (!overlappingStates.empty()) {
                         // keep all original states and remove the overlapping ones by bitwise operation
                         storm::storage::BitVector newStatesForExistingBlock = partition.getBlockByIndex(i).getStates() & ~overlappingStates;
-                        std::cout << "New bitvector of current block: " << newStatesForExistingBlock << std::endl;
+                        // std::cout << "New bitvector of current block: " << newStatesForExistingBlock << std::endl;
                         // std::cout << partition.getBlockByIndex(i).getStates() << std::endl;
                         if (newStatesForExistingBlock.empty()) {
-                          // TODO: remove current block from partition as it is not needed anymore
+                          // reuse current partition if it would end up empty
+                          partition.getBlockByIndex(i).setStates(overlappingStates);
+                        } else {
+                          // set new states for current block and create new one
+                          partition.getBlockByIndex(i).setStates(newStatesForExistingBlock);
+                          rework::Block<ValueType> newBlock(overlappingStates);
+                          // std::cout << "Size of bitvector of new block: " << newBlock.getStates().empty() << std::endl;
+                          partition.addBlock(newBlock);
                         }
-                        partition.getBlockByIndex(i).setStates(newStatesForExistingBlock); // <------- this new states bitvector is empty for the crowds model, we have to delete these
-
-                        rework::Block<ValueType> newBlock(overlappingStates);
-                        // std::cout << "Size of bitvector of new block: " << newBlock.getStates().empty() << std::endl;
-                        partition.addBlock(newBlock);
                       }
                     }
 
@@ -73,14 +74,14 @@ y
                   partition.print();
 
                   // Debugging state labels
-                  for (uint64_t state = 0; state < numberOfStates; state++) {
-                    std::cout << "Labels for state " << state << ": ";
-                    auto labels = model.getStateLabeling().getLabelsOfState(state);
-                    for (const auto& label : labels) {
-                      std::cout << label << " ";
-                    }
-                    std::cout << std::endl;
-                  }
+                  // for (uint64_t state = 0; state < numberOfStates; state++) {
+                  //   std::cout << "Labels for state " << state << ": ";
+                  //   auto labels = model.getStateLabeling().getLabelsOfState(state);
+                  //   for (const auto& label : labels) {
+                  //     std::cout << label << " ";
+                  //   }
+                  //   std::cout << std::endl;
+                  // }
                 }
 
                 template<typename ModelType>

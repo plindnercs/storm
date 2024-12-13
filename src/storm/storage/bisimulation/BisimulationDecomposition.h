@@ -14,6 +14,8 @@
 
 #include "storm/utility/ConstantsComparator.h"
 #include "storm/utility/constants.h"
+#include "RefinementType.h"
+#include "Signature.h"
 
 namespace storm {
 namespace logic {
@@ -95,6 +97,14 @@ class BisimulationDecomposition : public Decomposition<StateBlock> {
             return this->type;
         }
 
+        void setRefinementType(RefinementType refType) {
+          refinementType = refType;
+        }
+
+        RefinementType getRefinementType() const {
+          return this->refinementType;
+        }
+
         bool getBounded() const {
             return this->bounded;
         }
@@ -139,6 +149,9 @@ class BisimulationDecomposition : public Decomposition<StateBlock> {
         /// A flag that indicates whether step-bounded properties are to be preserved. This may only be set to tru
         /// when computing strong bisimulation equivalence.
         bool bounded;
+
+        /// A flag indicating if the refinement should follow a partition- or signature-based approach
+        RefinementType refinementType;
 
         /*!
          * Sets the options under the assumption that the given formula is the only one that is to be checked.
@@ -217,6 +230,23 @@ class BisimulationDecomposition : public Decomposition<StateBlock> {
      */
     virtual void refinePartitionBasedOnSplitter(bisimulation::Block<BlockDataType>& splitter,
                                                 std::vector<bisimulation::Block<BlockDataType>*>& splitterQueue) = 0;
+
+    /*!
+     * Performs the signature refinement on the model and thereby computes the equivalence classes under strong
+     * bisimulation equivalence. If required, the quotient model is built and may be retrieved using
+     * getQuotient().
+     */
+    void performSignatureRefinement();
+
+    /*!
+     * Computes a hash value based of the signature of the given state.
+     * @param state input state whose signature shall be computed.
+     * @param currentPartition current currentPartition to compute the signature.
+     * @return hash value of the state's signature.
+     */
+    storm::storage::bisimulation::Signature<typename ModelType::ValueType> computeStateSignature(
+            storm::storage::sparse::state_type state,
+            storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const;
 
     /*!
      * Builds the quotient model based on the previously computed equivalence classes (stored in the blocks

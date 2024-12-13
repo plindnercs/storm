@@ -25,6 +25,7 @@
 
 #include "storm/utility/SignalHandler.h"
 #include "storm/utility/macros.h"
+#include "Signature.h"
 
 namespace storm {
 namespace storage {
@@ -62,6 +63,7 @@ BisimulationDecomposition<ModelType, BlockDataType>::Options::Options()
       buildQuotient(true),
       keepRewards(false),
       type(BisimulationType::Strong),
+      refinementType(RefinementType::PARTITION),
       bounded(false) {
     // Intentionally left empty.
 }
@@ -223,7 +225,15 @@ void BisimulationDecomposition<ModelType, BlockDataType>::computeBisimulationDec
     this->initialize();
 
     std::chrono::high_resolution_clock::time_point refinementStart = std::chrono::high_resolution_clock::now();
-    this->performPartitionRefinement();
+    // compute refinement based on given refinement type
+    if (options.getRefinementType() == RefinementType::PARTITION) {
+      this->performPartitionRefinement();
+    } else if (options.getRefinementType() == RefinementType::SIGNATURE) {
+      this->performSignatureRefinement();
+    } else {
+      STORM_LOG_THROW(true, storm::exceptions::InvalidOptionException, "Unable to compute partition refinement as no valid refinement type was given.");
+      return;
+    }
     std::chrono::high_resolution_clock::duration refinementTime = std::chrono::high_resolution_clock::now() - refinementStart;
 
     std::chrono::high_resolution_clock::time_point extractionStart = std::chrono::high_resolution_clock::now();
@@ -345,11 +355,106 @@ void BisimulationDecomposition<ModelType, BlockDataType>::initializeLabelBasedPa
         partition.splitStates(model.getStates(label));
     }
 
+    // partition.print();
+
     // If the model has state rewards, we need to consider them, because otherwise reward properties are not
     // preserved.
     if (options.getKeepRewards() && model.hasRewardModel()) {
         this->splitInitialPartitionBasedOnRewards();
     }
+}
+
+template<typename ModelType, typename BlockDataType>
+void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefinement() {
+  auto& partition = this->partition;
+  // Insert all blocks into the queue as a (potential) splitter.
+  std::vector<Block<BlockDataType>*> blocksQueue;
+  std::for_each(partition.getBlocks().begin(), partition.getBlocks().end(), [&](std::unique_ptr<Block<BlockDataType>> const& block) {
+      blocksQueue.push_back(block.get());
+  });
+
+  // refine the partition as long as there were blocks split in the previous iteration
+  uint_fast64_t iterations = 0;
+  while (!blocksQueue.empty()) {
+    ++iterations;
+
+    Block<BlockDataType>* blockToRefine = blocksQueue.back();
+    blocksQueue.pop_back();
+
+    // Map states to their signature
+    std::unordered_map<storm::storage::sparse::state_type, storm::storage::bisimulation::Signature<typename ModelType::ValueType>> stateToSignature;
+    for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine); stateIt != stateIte; ++stateIt) {
+      auto state = *stateIt;
+      stateToSignature[state] = computeStateSignature(state, partition);
+    }
+
+    // Split the block based on signature
+    auto splitCondition = [&stateToSignature](storm::storage::sparse::state_type a, storm::storage::sparse::state_type b) {
+        // return !(stateToSignature.at(a) == stateToSignature.at(b));
+        return stateToSignature.at(a) < stateToSignature.at(b);
+    };
+
+    // Attempt to split the block
+    // TODO: Write our own split method?
+    bool wasSplit = partition.splitBlock(*blockToRefine, splitCondition
+            ,[&blocksQueue, &blockToRefine](Block<BlockDataType>& newBlock) {
+                // callback to add the newly created block to the queue, as we have to check the
+                // signatures of the respective states as well, if it has more than one single state
+                if (newBlock.getNumberOfStates() > 1) {
+                  blocksQueue.emplace_back(&newBlock);
+                  newBlock.data().setSplitter();
+                }
+
+                // Keep track of whether this is a block with reward states.
+                // newBlock.data().setHasRewards(blockToRefine->data().hasRewards());
+             });
+
+    if (wasSplit && blockToRefine->getNumberOfStates() > 1) {
+      blockToRefine->data().setSplitter();
+      blocksQueue.emplace_back(blockToRefine);
+    }
+
+    // std::cout << "Computed iteration " << iterations << "..." << std::endl;
+
+    if (storm::utility::resources::isTerminate()) {
+      // std::cout << "Performed " << iterations << " iterations of partition refinement before abort.\n";
+      STORM_LOG_THROW(false, storm::exceptions::AbortException, "Aborted in bisimulation computation.");
+      break;
+    }
+  }
+
+  std::cout << "Finished refinement after " << iterations << " iterations." << std::endl;
+}
+
+template<typename ModelType, typename BlockDataType>
+storm::storage::bisimulation::Signature<typename ModelType::ValueType> BisimulationDecomposition<ModelType, BlockDataType>::computeStateSignature(
+        storm::storage::sparse::state_type state,
+        storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const {
+  storm::storage::bisimulation::Signature<typename ModelType::ValueType> signature;
+
+  // Aggregate probabilities to each block
+  std::unordered_map<std::size_t, typename ModelType::ValueType> blockProbabilities;
+
+  for (auto& entry : model.getTransitionMatrix().getRow(state)) {
+    // std::cout << "Prob for state " << state << " to reach target state " << entry.getColumn() << ": " << entry.getValue() << std::endl;
+    auto& targetBlock = partition.getBlock(entry.getColumn()); // column marks the id of the target state
+    blockProbabilities[targetBlock.getId()] += entry.getValue();
+  }
+
+  // Convert to sorted vector for deterministic comparison
+  for (const auto& [blockId, totalProbability] : blockProbabilities) {
+    // std::cout << "Cumulated probability for block " << blockId << ": " << totalProbability << std::endl;
+    if constexpr (std::is_same_v<decltype(totalProbability), double>) {
+      double fractionalPart = totalProbability - std::floor(totalProbability);
+      if (fractionalPart > 0.05) {
+        std::cout << "Found fractional part for block " << blockId << ": " << fractionalPart << std::endl;
+      }
+    }
+    signature.addBlockProbability(blockId, totalProbability);
+  }
+
+  signature.normalize(); // Ensure deterministic ordering
+  return signature;
 }
 
 template<typename ModelType, typename BlockDataType>

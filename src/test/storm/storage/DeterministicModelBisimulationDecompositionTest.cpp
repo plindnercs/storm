@@ -1,3 +1,4 @@
+#include <storage/bisimulation-rework/BisimulationQuotienting.h>
 #include "storm-config.h"
 #include "storm-parsers/parser/AutoParser.h"
 #include "storm-parsers/parser/FormulaParser.h"
@@ -58,6 +59,102 @@ TEST(DeterministicModelBisimulationDecomposition, Die) {
     EXPECT_EQ(storm::models::ModelType::Dtmc, result->getType());
     EXPECT_EQ(5ul, result->getNumberOfStates());
     EXPECT_EQ(8ul, result->getNumberOfTransitions());
+}
+
+TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, Die) {
+  std::shared_ptr<storm::models::sparse::Model<double>> abstractModel =
+          storm::parser::AutoParser<>::parseModel(STORM_TEST_RESOURCES_DIR "/tra/die.tra", STORM_TEST_RESOURCES_DIR "/lab/die.lab", "", "");
+
+  ASSERT_EQ(abstractModel->getType(), storm::models::ModelType::Dtmc);
+  std::shared_ptr<storm::models::sparse::Dtmc<double>> dtmc = abstractModel->as<storm::models::sparse::Dtmc<double>>();
+
+  // set refinement type to SIGNATURE
+  typename storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>>::Options options;
+  options.setRefinementType(storm::storage::RefinementType::SIGNATURE);
+
+  storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>> bisim(*dtmc, options);
+  ASSERT_NO_THROW(bisim.computeBisimulationDecomposition());
+  std::shared_ptr<storm::models::sparse::Model<double>> result;
+  ASSERT_NO_THROW(result = bisim.getQuotient());
+
+  EXPECT_EQ(storm::models::ModelType::Dtmc, result->getType());
+  EXPECT_EQ(13ul, result->getNumberOfStates());
+  EXPECT_EQ(20ul, result->getNumberOfTransitions());
+}
+
+TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, Crowds) {
+  std::shared_ptr<storm::models::sparse::Model<double>> abstractModel =
+          storm::parser::AutoParser<>::parseModel(STORM_TEST_RESOURCES_DIR "/tra/crowds5_5.tra",
+                                                  STORM_TEST_RESOURCES_DIR "/lab/crowds5_5.lab", "", "");
+
+  ASSERT_EQ(abstractModel->getType(), storm::models::ModelType::Dtmc);
+  std::shared_ptr<storm::models::sparse::Dtmc<double>> dtmc = abstractModel->as<storm::models::sparse::Dtmc<double>>();
+
+  // set refinement type to SIGNATURE
+  typename storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>>::Options options;
+  options.setRefinementType(storm::storage::RefinementType::SIGNATURE);
+
+  storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>> bisim(*dtmc, options);
+  std::shared_ptr<storm::models::sparse::Model<double>> result;
+  ASSERT_NO_THROW(bisim.computeBisimulationDecomposition());
+  ASSERT_NO_THROW(result = bisim.getQuotient());
+
+  EXPECT_EQ(storm::models::ModelType::Dtmc, result->getType());
+  EXPECT_EQ(334ul, result->getNumberOfStates());
+  EXPECT_EQ(546ul, result->getNumberOfTransitions());
+}
+
+TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, SigRefTest) {
+  std::shared_ptr<storm::models::sparse::Model<double>> abstractModel =
+          storm::parser::AutoParser<>::parseModel(STORM_TEST_RESOURCES_DIR "/tra/sigref_test.tra",
+                                                  STORM_TEST_RESOURCES_DIR "/lab/sigref_test.lab", "", "");
+
+  ASSERT_EQ(abstractModel->getType(), storm::models::ModelType::Dtmc);
+  std::shared_ptr<storm::models::sparse::Dtmc<double>> dtmc = abstractModel->as<storm::models::sparse::Dtmc<double>>();
+
+  // set refinement type to SIGNATURE
+  typename storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>>::Options options;
+  options.setRefinementType(storm::storage::RefinementType::SIGNATURE);
+
+  storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>> bisim(*dtmc, options);
+  std::shared_ptr<storm::models::sparse::Model<double>> result;
+  ASSERT_NO_THROW(bisim.computeBisimulationDecomposition());
+  ASSERT_NO_THROW(result = bisim.getQuotient());
+
+  EXPECT_EQ(storm::models::ModelType::Dtmc, result->getType());
+  EXPECT_EQ(3ul, result->getNumberOfStates());
+  EXPECT_EQ(4ul, result->getNumberOfTransitions());
+}
+
+TEST(BisimulationQuotienting, Die) {
+// Parse the model
+  std::shared_ptr<storm::models::sparse::Model<double>> abstractModel =
+          // storm::parser::AutoParser<>::parseModel(
+          //         STORM_TEST_RESOURCES_DIR "/tra/die.tra",
+          //         STORM_TEST_RESOURCES_DIR "/lab/die.lab",
+          //         "", "");
+
+           storm::parser::AutoParser<>::parseModel(
+                   STORM_TEST_RESOURCES_DIR "/tra/crowds5_5.tra",
+                   STORM_TEST_RESOURCES_DIR "/lab/crowds5_5.lab",
+                   "", "");
+
+  // Ensure the parsed model is of the correct type (DTMC in this case)
+  ASSERT_EQ(abstractModel->getType(), storm::models::ModelType::Dtmc);
+  std::shared_ptr<storm::models::sparse::Dtmc<double>> dtmc =
+          abstractModel->as<storm::models::sparse::Dtmc<double>>();
+
+  // Instantiate the new BisimulationQuotienting class
+  storm::storage::bisimulation::rework::BisimulationQuotienting<storm::models::sparse::Dtmc<double>> bisimulation(*dtmc);
+
+  // Compute the bisimulation quotient
+  ASSERT_NO_THROW(bisimulation.computeBisimulationQuotient());
+
+  // Additional checks for correctness
+  // For example, you could compare the number of states or transitions in the quotient model
+  // std::shared_ptr<storm::models::sparse::Dtmc<double>> quotient = bisimulation.getQuotient();
+  // ASSERT_EQ(quotient->getNumberOfStates(), 13ul); // Expected number of states in the quotient
+  // ASSERT_EQ(quotient->getNumberOfTransitions(), 20ul); // Expected number of transitions in the quotient
 }
 
 TEST(DeterministicModelBisimulationDecomposition, Crowds) {
