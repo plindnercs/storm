@@ -14,7 +14,7 @@
 
 #include "storm/utility/ConstantsComparator.h"
 #include "storm/utility/constants.h"
-#include "RefinementType.h"
+#include "RefinementAlgorithm.h"
 #include "Signature.h"
 
 namespace storm {
@@ -97,12 +97,12 @@ class BisimulationDecomposition : public Decomposition<StateBlock> {
             return this->type;
         }
 
-        void setRefinementType(RefinementType refType) {
-          refinementType = refType;
+        void setRefinementAlgorithm(RefinementAlgorithm refType) {
+          refinementAlgorithm = refType;
         }
 
-        RefinementType getRefinementType() const {
-          return this->refinementType;
+        RefinementAlgorithm getRefinementAlgorithm() const {
+          return this->refinementAlgorithm;
         }
 
         bool getBounded() const {
@@ -151,7 +151,7 @@ class BisimulationDecomposition : public Decomposition<StateBlock> {
         bool bounded;
 
         /// A flag indicating if the refinement should follow a partition- or signature-based approach
-        RefinementType refinementType;
+        RefinementAlgorithm refinementAlgorithm;
 
         /*!
          * Sets the options under the assumption that the given formula is the only one that is to be checked.

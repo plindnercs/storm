@@ -22,6 +22,7 @@ const std::string BisimulationSettings::reuseOptionName = "reuse";
 const std::string BisimulationSettings::initialPartitionOptionName = "init";
 const std::string BisimulationSettings::refinementModeOptionName = "refine";
 const std::string BisimulationSettings::exactArithmeticDdOptionName = "ddexact";
+const std::string BisimulationSettings::refinementAlgorithmOptionName = "refinealgo";
 
 BisimulationSettings::BisimulationSettings() : ModuleSettings(moduleName) {
     std::vector<std::string> types = {"strong", "weak"};
@@ -91,6 +92,15 @@ BisimulationSettings::BisimulationSettings() : ModuleSettings(moduleName) {
                                          .setDefaultValueString("full")
                                          .build())
                         .build());
+
+  std::vector<std::string> refinementAlgorithms = {"partition", "signature"};
+  this->addOption(storm::settings::OptionBuilder(moduleName, refinementAlgorithmOptionName, true, "Sets which refinement algorithm to use.")
+                          .setIsAdvanced()
+                          .addArgument(storm::settings::ArgumentBuilder::createStringArgument("refinement algorithm", "The refinement algorithm to use.")
+                                               .addValidatorString(ArgumentValidatorFactory::createMultipleChoiceValidator(refinementAlgorithms))
+                                               .setDefaultValueString("partition")
+                                               .build())
+                          .build());
 }
 
 bool BisimulationSettings::isStrongBisimulationSet() const {
@@ -171,6 +181,16 @@ BisimulationSettings::RefinementMode BisimulationSettings::getRefinementMode() c
         return RefinementMode::ChangedStates;
     }
     return RefinementMode::Full;
+}
+
+BisimulationSettings::RefinementAlgorithm BisimulationSettings::getRefinementAlgorithm() const {
+  std::string refinementAlgorithmAsString = this->getOption(refinementAlgorithmOptionName).getArgumentByName("refinement algorithm").getValueAsString();
+  if (refinementAlgorithmAsString == "partition") {
+    return RefinementAlgorithm::Partition;
+  } else if (refinementAlgorithmAsString == "signature") {
+    return RefinementAlgorithm::Signature;
+  }
+  return RefinementAlgorithm::Partition;
 }
 
 bool BisimulationSettings::check() const {

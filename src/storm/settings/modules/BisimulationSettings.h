@@ -24,6 +24,8 @@ class BisimulationSettings : public ModuleSettings {
 
     enum class RefinementMode { Full, ChangedStates };
 
+    enum class RefinementAlgorithm { Partition, Signature };
+
     /*!
      * Creates a new set of bisimulation settings.
      */
@@ -96,6 +98,11 @@ class BisimulationSettings : public ModuleSettings {
      */
     RefinementMode getRefinementMode() const;
 
+    /*!
+     * Retrieves the refinement algorithm to use.
+     */
+    RefinementAlgorithm getRefinementAlgorithm() const;
+
     virtual bool check() const override;
 
     // The name of the module.
@@ -113,6 +120,7 @@ class BisimulationSettings : public ModuleSettings {
     static const std::string refinementModeOptionName;
     static const std::string parallelismModeOptionName;
     static const std::string exactArithmeticDdOptionName;
+    static const std::string refinementAlgorithmOptionName;
 };
 }  // namespace modules
 }  // namespace settings

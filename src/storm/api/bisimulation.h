@@ -26,6 +26,12 @@ std::shared_ptr<ModelType> performDeterministicSparseBisimulationMinimization(st
     }
     options.setType(type);
 
+    storm::settings::modules::BisimulationSettings::RefinementAlgorithm refinementAlgorithm = storm::settings::getModule<storm::settings::modules::BisimulationSettings>().getRefinementAlgorithm();
+    if (refinementAlgorithm == storm::settings::modules::BisimulationSettings::RefinementAlgorithm::Signature) {
+      options.setRefinementAlgorithm(storage::RefinementAlgorithm::SIGNATURE);
+      std::cout << "Set refinement algorithm to Signature" << std::endl;
+    }
+
     storm::storage::DeterministicModelBisimulationDecomposition<ModelType> bisimulationDecomposition(*model, options);
     bisimulationDecomposition.computeBisimulationDecomposition();
     return bisimulationDecomposition.getQuotient();

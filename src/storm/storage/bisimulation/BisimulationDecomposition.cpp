@@ -63,7 +63,7 @@ BisimulationDecomposition<ModelType, BlockDataType>::Options::Options()
       buildQuotient(true),
       keepRewards(false),
       type(BisimulationType::Strong),
-      refinementType(RefinementType::PARTITION),
+      refinementAlgorithm(RefinementAlgorithm::PARTITION),
       bounded(false) {
     // Intentionally left empty.
 }
@@ -226,9 +226,9 @@ void BisimulationDecomposition<ModelType, BlockDataType>::computeBisimulationDec
 
     std::chrono::high_resolution_clock::time_point refinementStart = std::chrono::high_resolution_clock::now();
     // compute refinement based on given refinement type
-    if (options.getRefinementType() == RefinementType::PARTITION) {
+    if (options.getRefinementAlgorithm() == RefinementAlgorithm::PARTITION) {
       this->performPartitionRefinement();
-    } else if (options.getRefinementType() == RefinementType::SIGNATURE) {
+    } else if (options.getRefinementAlgorithm() == RefinementAlgorithm::SIGNATURE) {
       this->performSignatureRefinement();
     } else {
       STORM_LOG_THROW(true, storm::exceptions::InvalidOptionException, "Unable to compute partition refinement as no valid refinement type was given.");
@@ -247,6 +247,9 @@ void BisimulationDecomposition<ModelType, BlockDataType>::computeBisimulationDec
     std::chrono::high_resolution_clock::duration quotientBuildTime = std::chrono::high_resolution_clock::now() - quotientBuildStart;
 
     std::chrono::high_resolution_clock::duration totalTime = std::chrono::high_resolution_clock::now() - totalStart;
+
+    std::chrono::milliseconds refinementTimeInMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(refinementTime);
+    std::cout << "    * time for partitioning: " << refinementTimeInMilliseconds.count() << "ms\n";
 
     if (storm::settings::getModule<storm::settings::modules::CoreSettings>().isShowStatisticsSet()) {
         std::chrono::milliseconds initialPartitionTimeInMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(initialPartitionTime);
@@ -296,6 +299,8 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performPartitionRefine
             break;
         }
     }
+
+    std::cout << "Finished refinement after " << iterations << " iterations." << std::endl;
 }
 
 template<typename ModelType, typename BlockDataType>
@@ -375,53 +380,74 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
 
   // refine the partition as long as there were blocks split in the previous iteration
   uint_fast64_t iterations = 0;
-  while (!blocksQueue.empty()) {
+  uint_fast64_t blockOfPreviousIteration;
+  do {
     ++iterations;
+    blockOfPreviousIteration = blocksQueue.size();
 
-    Block<BlockDataType>* blockToRefine = blocksQueue.back();
-    blocksQueue.pop_back();
+    // move bigger blocks to the beginning
+    std::sort(blocksQueue.begin(), blocksQueue.end(),
+              [](Block<BlockDataType> const* b1, Block<BlockDataType> const* b2) { return b1->getNumberOfStates() > b2->getNumberOfStates(); });
 
-    // Map states to their signature
-    std::unordered_map<storm::storage::sparse::state_type, storm::storage::bisimulation::Signature<typename ModelType::ValueType>> stateToSignature;
-    for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine); stateIt != stateIte; ++stateIt) {
-      auto state = *stateIt;
-      stateToSignature[state] = computeStateSignature(state, partition);
+    while (!blocksQueue.empty()) {
+      Block<BlockDataType>* blockToRefine = blocksQueue.back();
+      blocksQueue.pop_back();
+
+      // Map states to their signature
+      std::unordered_map<storm::storage::sparse::state_type, storm::storage::bisimulation::Signature<typename ModelType::ValueType>> stateToSignature;
+      for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine); stateIt != stateIte; ++stateIt) {
+        auto state = *stateIt;
+        stateToSignature[state] = computeStateSignature(state, partition);
+      }
+
+      // Split the block based on signature
+      auto splitCondition = [&stateToSignature](storm::storage::sparse::state_type a, storm::storage::sparse::state_type b) {
+          // return !(stateToSignature.at(a) == stateToSignature.at(b));
+          return stateToSignature.at(a) < stateToSignature.at(b);
+      };
+
+      // Attempt to split the block
+      bool wasSplit = partition.splitBlock(*blockToRefine, splitCondition,
+                                           [&blocksQueue, &blockToRefine](Block<BlockDataType>& newBlock) {
+                                               // callback to add the newly created block to the queue, as we have to check the
+                                               // signatures of the respective states as well, if it has more than one single state
+                                               if (newBlock.getNumberOfStates() > 1) {
+                                                 // std::cout << "Created new block with " << newBlock.getNumberOfStates() << " states" << std::endl;
+                                                 // blocksQueue.emplace_back(&newBlock);
+                                                 newBlock.data().setSplitter();
+                                               }
+
+                                               // Keep track of whether this is a block with reward states.
+                                               // newBlock.data().setHasRewards(blockToRefine->data().hasRewards());
+                                           });
+
+      // if (!wasSplit) {
+      //   std::cout << "Signatures of the states from unsplit block:\n";
+      //   for (auto it = stateToSignature.begin(); it != stateToSignature.end(); ++it) {
+      //     std::cout << "State " << it->first << ": " << it->second.toString() << std::endl;
+      //   }
+      // }
+
+      if (/*wasSplit &&*/ blockToRefine->getNumberOfStates() > 1) {
+        blockToRefine->data().setSplitter();
+        // blocksQueue.emplace_back(blockToRefine);
+      }
     }
 
-    // Split the block based on signature
-    auto splitCondition = [&stateToSignature](storm::storage::sparse::state_type a, storm::storage::sparse::state_type b) {
-        // return !(stateToSignature.at(a) == stateToSignature.at(b));
-        return stateToSignature.at(a) < stateToSignature.at(b);
-    };
+    std::cout << "Computed iteration " << iterations << "..." << std::endl;
 
-    // Attempt to split the block
-    // TODO: Write our own split method?
-    bool wasSplit = partition.splitBlock(*blockToRefine, splitCondition
-            ,[&blocksQueue, &blockToRefine](Block<BlockDataType>& newBlock) {
-                // callback to add the newly created block to the queue, as we have to check the
-                // signatures of the respective states as well, if it has more than one single state
-                if (newBlock.getNumberOfStates() > 1) {
-                  blocksQueue.emplace_back(&newBlock);
-                  newBlock.data().setSplitter();
-                }
-
-                // Keep track of whether this is a block with reward states.
-                // newBlock.data().setHasRewards(blockToRefine->data().hasRewards());
-             });
-
-    if (wasSplit && blockToRefine->getNumberOfStates() > 1) {
-      blockToRefine->data().setSplitter();
-      blocksQueue.emplace_back(blockToRefine);
-    }
-
-    // std::cout << "Computed iteration " << iterations << "..." << std::endl;
+    // add all blocks back to queue for next complete scan of all states
+    // we do this since it is possible that state signatures change even if their current block was not split
+    std::for_each(partition.getBlocks().begin(), partition.getBlocks().end(), [&](std::unique_ptr<Block<BlockDataType>> const& block) {
+        blocksQueue.push_back(block.get());
+    });
 
     if (storm::utility::resources::isTerminate()) {
       // std::cout << "Performed " << iterations << " iterations of partition refinement before abort.\n";
       STORM_LOG_THROW(false, storm::exceptions::AbortException, "Aborted in bisimulation computation.");
       break;
     }
-  }
+  } while(blockOfPreviousIteration < blocksQueue.size());
 
   std::cout << "Finished refinement after " << iterations << " iterations." << std::endl;
 }
@@ -444,12 +470,12 @@ storm::storage::bisimulation::Signature<typename ModelType::ValueType> Bisimulat
   // Convert to sorted vector for deterministic comparison
   for (const auto& [blockId, totalProbability] : blockProbabilities) {
     // std::cout << "Cumulated probability for block " << blockId << ": " << totalProbability << std::endl;
-    if constexpr (std::is_same_v<decltype(totalProbability), double>) {
-      double fractionalPart = totalProbability - std::floor(totalProbability);
-      if (fractionalPart > 0.05) {
-        std::cout << "Found fractional part for block " << blockId << ": " << fractionalPart << std::endl;
-      }
-    }
+    // if constexpr (std::is_same_v<decltype(totalProbability), double>) {
+    //   double fractionalPart = totalProbability - std::floor(totalProbability);
+    //   if (fractionalPart > 0.05) {
+    //     std::cout << "Found fractional part for block " << blockId << ": " << fractionalPart << std::endl;
+    //   }
+    // }
     signature.addBlockProbability(blockId, totalProbability);
   }
 
