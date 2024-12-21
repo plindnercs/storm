@@ -394,10 +394,10 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
       blocksQueue.pop_back();
 
       // Map states to their signature
-      std::unordered_map<storm::storage::sparse::state_type, storm::storage::bisimulation::Signature<typename ModelType::ValueType>> stateToSignature;
+      std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateToSignature;
       for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine); stateIt != stateIte; ++stateIt) {
         auto state = *stateIt;
-        stateToSignature[state] = computeStateSignature(state, partition);
+        stateToSignature[state] = computeStateSignatureHash(state, partition);
       }
 
       // Split the block based on signature
@@ -434,7 +434,7 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
       }
     }
 
-    std::cout << "Computed iteration " << iterations << "..." << std::endl;
+    // std::cout << "Computed iteration " << iterations << "..." << std::endl;
 
     // add all blocks back to queue for next complete scan of all states
     // we do this since it is possible that state signatures change even if their current block was not split
@@ -467,20 +467,19 @@ storm::storage::bisimulation::Signature<typename ModelType::ValueType> Bisimulat
     blockProbabilities[targetBlock.getId()] += entry.getValue();
   }
 
-  // Convert to sorted vector for deterministic comparison
   for (const auto& [blockId, totalProbability] : blockProbabilities) {
-    // std::cout << "Cumulated probability for block " << blockId << ": " << totalProbability << std::endl;
-    // if constexpr (std::is_same_v<decltype(totalProbability), double>) {
-    //   double fractionalPart = totalProbability - std::floor(totalProbability);
-    //   if (fractionalPart > 0.05) {
-    //     std::cout << "Found fractional part for block " << blockId << ": " << fractionalPart << std::endl;
-    //   }
-    // }
     signature.addBlockProbability(blockId, totalProbability);
   }
 
   signature.normalize(); // Ensure deterministic ordering
   return signature;
+}
+
+template<typename ModelType, typename BlockDataType>
+std::size_t BisimulationDecomposition<ModelType, BlockDataType>::computeStateSignatureHash(
+        storm::storage::sparse::state_type state,
+        storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const {
+  return std::hash<std::string>{}(computeStateSignature(state, partition).toString());
 }
 
 template<typename ModelType, typename BlockDataType>

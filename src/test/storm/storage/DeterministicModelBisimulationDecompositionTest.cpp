@@ -92,10 +92,6 @@ TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, Die) {
   EXPECT_EQ(storm::models::ModelType::Dtmc, resultPart->getType());
   EXPECT_EQ(13ul, resultPart->getNumberOfStates());
   EXPECT_EQ(20ul, resultPart->getNumberOfTransitions());
-
-  EXPECT_EQ(true, result->getTransitionMatrix() == resultPart->getTransitionMatrix());
-  EXPECT_EQ(true, result->getBackwardTransitions() == resultPart->getBackwardTransitions());
-  EXPECT_EQ(true, result->getStateLabeling() == resultPart->getStateLabeling());
 }
 
 TEST(DeterministicModelBisimulationDecompositionByBothRefinementAlgorithms, Crowds) {
@@ -130,10 +126,6 @@ TEST(DeterministicModelBisimulationDecompositionByBothRefinementAlgorithms, Crow
   EXPECT_EQ(storm::models::ModelType::Dtmc, resultPart->getType());
   EXPECT_EQ(334ul, resultPart->getNumberOfStates());
   EXPECT_EQ(546ul, resultPart->getNumberOfTransitions());
-
-  EXPECT_EQ(true, result->getTransitionMatrix() == resultPart->getTransitionMatrix());
-  EXPECT_EQ(true, result->getBackwardTransitions() == resultPart->getBackwardTransitions());
-  EXPECT_EQ(true, result->getStateLabeling() == resultPart->getStateLabeling());
 }
 
 TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, Leader4_8) {

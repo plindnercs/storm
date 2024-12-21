@@ -239,12 +239,22 @@ class BisimulationDecomposition : public Decomposition<StateBlock> {
     void performSignatureRefinement();
 
     /*!
-     * Computes a hash value based of the signature of the given state.
+     * Computes the signature of the given state with respect to the given partition.
      * @param state input state whose signature shall be computed.
      * @param currentPartition current currentPartition to compute the signature.
      * @return hash value of the state's signature.
      */
     storm::storage::bisimulation::Signature<typename ModelType::ValueType> computeStateSignature(
+            storm::storage::sparse::state_type state,
+            storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const;
+
+    /*!
+     * Computes a hash value based of the signature of the given state with respect to the given partition.
+     * @param state input state whose signature shall be computed.
+     * @param currentPartition current currentPartition to compute the signature.
+     * @return hash value of the state's signature.
+     */
+    std::size_t computeStateSignatureHash(
             storm::storage::sparse::state_type state,
             storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const;
 
