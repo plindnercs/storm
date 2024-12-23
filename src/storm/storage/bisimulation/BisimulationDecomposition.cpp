@@ -371,83 +371,63 @@ void BisimulationDecomposition<ModelType, BlockDataType>::initializeLabelBasedPa
 
 template<typename ModelType, typename BlockDataType>
 void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefinement() {
-  auto& partition = this->partition;
-  // Insert all blocks into the queue as a (potential) splitter.
+  // insert all blocks into the queue for refinement
   std::vector<Block<BlockDataType>*> blocksQueue;
   std::for_each(partition.getBlocks().begin(), partition.getBlocks().end(), [&](std::unique_ptr<Block<BlockDataType>> const& block) {
-      blocksQueue.push_back(block.get());
+    blocksQueue.push_back(block.get());
+    block->data().setNeedsRefinement(true);
   });
 
-  // refine the partition as long as there were blocks split in the previous iteration
+  // move smaller blocks to the beginning
+  std::sort(blocksQueue.begin(), blocksQueue.end(),
+            [](Block<BlockDataType> const* b1, Block<BlockDataType> const* b2) { return b1->getNumberOfStates() < b2->getNumberOfStates(); });
+
+  // refine the partition as long as the queue is not emtpy
   uint_fast64_t iterations = 0;
-  uint_fast64_t blockOfPreviousIteration;
-  do {
+  while (!blocksQueue.empty()) {
     ++iterations;
-    blockOfPreviousIteration = blocksQueue.size();
 
-    // move bigger blocks to the beginning
-    std::sort(blocksQueue.begin(), blocksQueue.end(),
-              [](Block<BlockDataType> const* b1, Block<BlockDataType> const* b2) { return b1->getNumberOfStates() > b2->getNumberOfStates(); });
+    Block<BlockDataType> *blockToRefine = blocksQueue.back();
+    blocksQueue.pop_back();
+    blockToRefine->data().setNeedsRefinement(false);
 
-    while (!blocksQueue.empty()) {
-      Block<BlockDataType>* blockToRefine = blocksQueue.back();
-      blocksQueue.pop_back();
-
-      // Map states to their signature
-      std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateToSignature;
-      for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine); stateIt != stateIte; ++stateIt) {
-        auto state = *stateIt;
-        stateToSignature[state] = computeStateSignatureHash(state, partition);
-      }
-
-      // Split the block based on signature
-      auto splitCondition = [&stateToSignature](storm::storage::sparse::state_type a, storm::storage::sparse::state_type b) {
-          // return !(stateToSignature.at(a) == stateToSignature.at(b));
-          return stateToSignature.at(a) < stateToSignature.at(b);
-      };
-
-      // Attempt to split the block
-      bool wasSplit = partition.splitBlock(*blockToRefine, splitCondition,
-                                           [&blocksQueue, &blockToRefine](Block<BlockDataType>& newBlock) {
-                                               // callback to add the newly created block to the queue, as we have to check the
-                                               // signatures of the respective states as well, if it has more than one single state
-                                               if (newBlock.getNumberOfStates() > 1) {
-                                                 // std::cout << "Created new block with " << newBlock.getNumberOfStates() << " states" << std::endl;
-                                                 // blocksQueue.emplace_back(&newBlock);
-                                                 newBlock.data().setSplitter();
-                                               }
-
-                                               // Keep track of whether this is a block with reward states.
-                                               // newBlock.data().setHasRewards(blockToRefine->data().hasRewards());
-                                           });
-
-      // if (!wasSplit) {
-      //   std::cout << "Signatures of the states from unsplit block:\n";
-      //   for (auto it = stateToSignature.begin(); it != stateToSignature.end(); ++it) {
-      //     std::cout << "State " << it->first << ": " << it->second.toString() << std::endl;
-      //   }
-      // }
-
-      if (/*wasSplit &&*/ blockToRefine->getNumberOfStates() > 1) {
-        blockToRefine->data().setSplitter();
-        // blocksQueue.emplace_back(blockToRefine);
-      }
+    // map states to their signature
+    std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateToSignature;
+    for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine);
+         stateIt != stateIte; ++stateIt) {
+      auto state = *stateIt;
+      stateToSignature[state] = computeStateSignatureHash(state, partition);
     }
 
-    // std::cout << "Computed iteration " << iterations << "..." << std::endl;
+    // check for difference in the signature hashes
+    auto splitCondition = [&stateToSignature](storm::storage::sparse::state_type a,
+                                              storm::storage::sparse::state_type b) {
+        return stateToSignature.at(a) < stateToSignature.at(b);
+    };
 
-    // add all blocks back to queue for next complete scan of all states
-    // we do this since it is possible that state signatures change even if their current block was not split
-    std::for_each(partition.getBlocks().begin(), partition.getBlocks().end(), [&](std::unique_ptr<Block<BlockDataType>> const& block) {
-        blocksQueue.push_back(block.get());
-    });
+    // split blocks according to their state signatures if possible
+    partition.splitBlock(*blockToRefine, splitCondition,
+                                         [&blocksQueue, this](Block<BlockDataType> &newBlock) {
+                                             // add dependent blocks (outgoing transitions from newBlock)
+                                             for (auto stateIt = partition.begin(newBlock), stateIte = partition.end(newBlock);
+                                                  stateIt != stateIte; ++stateIt) {
+                                               for (auto &transition: backwardTransitions.getRow(*stateIt)) {
+                                                 auto &targetBlock = partition.getBlock(transition.getColumn());
+                                                 // place target block on queue only if it is not already there
+                                                 if (!targetBlock.data().needsRefinement()) {
+                                                   targetBlock.data().setNeedsRefinement(true);
+                                                   blocksQueue.push_back(&targetBlock);
+                                                 }
+                                               }
+                                             }
+                                         });
 
     if (storm::utility::resources::isTerminate()) {
       // std::cout << "Performed " << iterations << " iterations of partition refinement before abort.\n";
       STORM_LOG_THROW(false, storm::exceptions::AbortException, "Aborted in bisimulation computation.");
       break;
     }
-  } while(blockOfPreviousIteration < blocksQueue.size());
+  }
 
   std::cout << "Finished refinement after " << iterations << " iterations." << std::endl;
 }
