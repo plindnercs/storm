@@ -374,15 +374,11 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
   // insert all blocks into the queue for refinement
   std::vector<Block<BlockDataType>*> blocksQueue;
   std::for_each(partition.getBlocks().begin(), partition.getBlocks().end(), [&](std::unique_ptr<Block<BlockDataType>> const& block) {
-    blocksQueue.push_back(block.get());
     block->data().setNeedsRefinement(true);
+    blocksQueue.push_back(block.get());
   });
 
-  // move smaller blocks to the beginning
-  std::sort(blocksQueue.begin(), blocksQueue.end(),
-            [](Block<BlockDataType> const* b1, Block<BlockDataType> const* b2) { return b1->getNumberOfStates() < b2->getNumberOfStates(); });
-
-  // refine the partition as long as the queue is not emtpy
+  // refine the partition as long as the queue is not empty
   uint_fast64_t iterations = 0;
   while (!blocksQueue.empty()) {
     ++iterations;
@@ -408,13 +404,18 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     // split blocks according to their state signatures if possible
     partition.splitBlock(*blockToRefine, splitCondition,
                                          [&blocksQueue, this](Block<BlockDataType> &newBlock) {
+                                              if (newBlock.getNumberOfStates() > 1) {
+                                                newBlock.data().setNeedsRefinement(true);
+                                                blocksQueue.push_back(&newBlock);
+                                              }
+
                                              // add dependent blocks (outgoing transitions from newBlock)
                                              for (auto stateIt = partition.begin(newBlock), stateIte = partition.end(newBlock);
                                                   stateIt != stateIte; ++stateIt) {
                                                for (auto &transition: backwardTransitions.getRow(*stateIt)) {
                                                  auto &targetBlock = partition.getBlock(transition.getColumn());
                                                  // place target block on queue only if it is not already there
-                                                 if (!targetBlock.data().needsRefinement()) {
+                                                 if (!targetBlock.data().needsRefinement() && targetBlock.getNumberOfStates() > 1) {
                                                    targetBlock.data().setNeedsRefinement(true);
                                                    blocksQueue.push_back(&targetBlock);
                                                  }
