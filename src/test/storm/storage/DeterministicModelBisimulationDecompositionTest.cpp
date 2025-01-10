@@ -128,6 +128,28 @@ TEST(DeterministicModelBisimulationDecompositionByBothRefinementAlgorithms, Crow
   EXPECT_EQ(546ul, resultPart->getNumberOfTransitions());
 }
 
+TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, Crowds) {
+  std::shared_ptr<storm::models::sparse::Model<double>> abstractModel =
+          storm::parser::AutoParser<>::parseModel(STORM_TEST_RESOURCES_DIR "/tra/crowds5_5.tra",
+                                                  STORM_TEST_RESOURCES_DIR "/lab/crowds5_5.lab", "", "");
+
+  ASSERT_EQ(abstractModel->getType(), storm::models::ModelType::Dtmc);
+  std::shared_ptr<storm::models::sparse::Dtmc<double>> dtmc = abstractModel->as<storm::models::sparse::Dtmc<double>>();
+
+  // set refinement type to SIGNATURE
+  typename storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>>::Options options;
+  options.setRefinementAlgorithm(storm::storage::RefinementAlgorithm::SIGNATURE);
+
+  storm::storage::DeterministicModelBisimulationDecomposition<storm::models::sparse::Dtmc<double>> bisim(*dtmc, options);
+  std::shared_ptr<storm::models::sparse::Model<double>> result;
+  ASSERT_NO_THROW(bisim.computeBisimulationDecomposition());
+  ASSERT_NO_THROW(result = bisim.getQuotient());
+
+  EXPECT_EQ(storm::models::ModelType::Dtmc, result->getType());
+  EXPECT_EQ(334ul, result->getNumberOfStates());
+  EXPECT_EQ(546ul, result->getNumberOfTransitions());
+}
+
 TEST(DeterministicModelBisimulationDecompositionBySignatureRefinement, Leader4_8) {
   std::shared_ptr<storm::models::sparse::Model<double>> abstractModel =
           storm::parser::AutoParser<>::parseModel(STORM_TEST_RESOURCES_DIR "/tra/leader4_8.tra",

@@ -278,6 +278,8 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performPartitionRefine
 
     // Then perform the actual splitting until there are no more splitters.
     uint_fast64_t iterations = 0;
+    uint_fast64_t numberOfBlocks = 0;
+    uint_fast64_t noSplitCounter = 0;
     while (!splitterQueue.empty()) {
         ++iterations;
 
@@ -290,8 +292,13 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performPartitionRefine
         splitterQueue.pop_back();
         splitter->data().setSplitter(false);
 
+        numberOfBlocks = partition.getBlocks().size();
         // Now refine the partition using the current splitter.
         refinePartitionBasedOnSplitter(*splitter, splitterQueue);
+
+        if (numberOfBlocks == partition.getBlocks().size()) {
+          noSplitCounter++;
+        }
 
         if (storm::utility::resources::isTerminate()) {
             std::cout << "Performed " << iterations << " iterations of partition refinement before abort.\n";
@@ -301,6 +308,7 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performPartitionRefine
     }
 
     std::cout << "Finished refinement after " << iterations << " iterations." << std::endl;
+    std::cout << "Attempt to split block failed " << noSplitCounter << " times." << std::endl;
 }
 
 template<typename ModelType, typename BlockDataType>
@@ -378,8 +386,12 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     blocksQueue.push_back(block.get());
   });
 
+  // cache for state signatures
+  std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateSignatureCache;
+
   // refine the partition as long as the queue is not empty
   uint_fast64_t iterations = 0;
+  uint_fast64_t noSplitCounter = 0;
   while (!blocksQueue.empty()) {
     ++iterations;
 
@@ -392,7 +404,13 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine);
          stateIt != stateIte; ++stateIt) {
       auto state = *stateIt;
-      stateToSignature[state] = computeStateSignatureHash(state, partition);
+      if (stateSignatureCache.find(state) == stateSignatureCache.end()) {
+        auto signatureHash = computeStateSignatureHash(state, partition);
+        stateToSignature[state] = signatureHash;
+        stateSignatureCache[state] = signatureHash;
+      } else {
+        stateToSignature[state] = stateSignatureCache[state];
+      }
     }
 
     // check for difference in the signature hashes
@@ -402,8 +420,8 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     };
 
     // split blocks according to their state signatures if possible
-    partition.splitBlock(*blockToRefine, splitCondition,
-                                         [&blocksQueue, this](Block<BlockDataType> &newBlock) {
+    auto wasSplit = partition.splitBlock(*blockToRefine, splitCondition,
+                                         [&blocksQueue, &stateSignatureCache, this](Block<BlockDataType> &newBlock) {
                                               if (newBlock.getNumberOfStates() > 1) {
                                                 newBlock.data().setNeedsRefinement(true);
                                                 blocksQueue.push_back(&newBlock);
@@ -419,9 +437,16 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
                                                    targetBlock.data().setNeedsRefinement(true);
                                                    blocksQueue.push_back(&targetBlock);
                                                  }
+
+                                                 // erase cache for dependent states
+                                                 stateSignatureCache.erase(transition.getColumn());
                                                }
                                              }
                                          });
+
+    if (!wasSplit) {
+      noSplitCounter++;
+    }
 
     if (storm::utility::resources::isTerminate()) {
       // std::cout << "Performed " << iterations << " iterations of partition refinement before abort.\n";
@@ -431,6 +456,7 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
   }
 
   std::cout << "Finished refinement after " << iterations << " iterations." << std::endl;
+  std::cout << "Attempt to split block failed " << noSplitCounter << " times." << std::endl;
 }
 
 template<typename ModelType, typename BlockDataType>
@@ -439,20 +465,12 @@ storm::storage::bisimulation::Signature<typename ModelType::ValueType> Bisimulat
         storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const {
   storm::storage::bisimulation::Signature<typename ModelType::ValueType> signature;
 
-  // Aggregate probabilities to each block
-  std::unordered_map<std::size_t, typename ModelType::ValueType> blockProbabilities;
-
   for (auto& entry : model.getTransitionMatrix().getRow(state)) {
     // std::cout << "Prob for state " << state << " to reach target state " << entry.getColumn() << ": " << entry.getValue() << std::endl;
     auto& targetBlock = partition.getBlock(entry.getColumn()); // column marks the id of the target state
-    blockProbabilities[targetBlock.getId()] += entry.getValue();
+    signature.addBlockProbability(targetBlock.getId(), entry.getValue());
   }
 
-  for (const auto& [blockId, totalProbability] : blockProbabilities) {
-    signature.addBlockProbability(blockId, totalProbability);
-  }
-
-  signature.normalize(); // Ensure deterministic ordering
   return signature;
 }
 
@@ -460,6 +478,7 @@ template<typename ModelType, typename BlockDataType>
 std::size_t BisimulationDecomposition<ModelType, BlockDataType>::computeStateSignatureHash(
         storm::storage::sparse::state_type state,
         storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const {
+
   return std::hash<std::string>{}(computeStateSignature(state, partition).toString());
 }
 
