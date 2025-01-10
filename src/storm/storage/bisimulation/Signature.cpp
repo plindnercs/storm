@@ -26,6 +26,17 @@ size_t Signature<ValueType>::computeHash() const {
     return seed;
 }
 
+template<typename ValueType>
+std::string Signature<ValueType>::toString() const {
+  std::string result;
+  for (const auto& [blockId, prob] : blockProbabilities) {
+    if constexpr (std::is_same_v<decltype(prob), const double>) {
+      result += std::to_string(blockId) + ":" + std::to_string(prob) + ",";
+    }
+  }
+  return result;
+}
+
 template class Signature<double>;
 
 #ifdef STORM_HAVE_CARL

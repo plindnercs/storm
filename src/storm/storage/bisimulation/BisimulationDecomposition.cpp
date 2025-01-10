@@ -478,7 +478,11 @@ storm::storage::bisimulation::Signature<typename ModelType::ValueType> Bisimulat
 template<typename ModelType, typename BlockDataType>
 std::size_t BisimulationDecomposition<ModelType, BlockDataType>::computeStateSignatureHash(
         storm::storage::sparse::state_type state) const {
+  // TODO: Interestingly, the boost hash function seems to create collisions, hence the quotient is not minimal per default.
+  // TODO: When using --exact, the quotient gets calculated correctly. Thus, Boost does not guarantee a sufficient
+  // TODO: precision for doubles
   return computeStateSignature(state, partition).computeHash();
+  // return std::hash<std::string>{}(computeStateSignature(state, partition).toString());
 }
 
 template<typename ModelType, typename BlockDataType>
