@@ -368,8 +368,6 @@ void BisimulationDecomposition<ModelType, BlockDataType>::initializeLabelBasedPa
         partition.splitStates(model.getStates(label));
     }
 
-    // partition.print();
-
     // If the model has state rewards, we need to consider them, because otherwise reward properties are not
     // preserved.
     if (options.getKeepRewards() && model.hasRewardModel()) {
@@ -386,12 +384,12 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     blocksQueue.push_back(block.get());
   });
 
-  // cache for state signatures
-  std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateSignatureCache;
-
   // refine the partition as long as the queue is not empty
   uint_fast64_t iterations = 0;
   uint_fast64_t noSplitCounter = 0;
+
+  std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateToSignature;
+  std::vector<storm::storage::sparse::state_type> statesWithInvalidSignature;
   while (!blocksQueue.empty()) {
     ++iterations;
 
@@ -400,16 +398,13 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     blockToRefine->data().setNeedsRefinement(false);
 
     // map states to their signature
-    std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateToSignature;
     for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine);
          stateIt != stateIte; ++stateIt) {
       auto state = *stateIt;
-      if (stateSignatureCache.find(state) == stateSignatureCache.end()) {
-        auto signatureHash = computeStateSignatureHash(state, partition);
+      // only compute the state signature if it was invalidated
+      if (stateToSignature.find(state) == stateToSignature.end()) {
+        auto signatureHash = computeStateSignatureHash(state);
         stateToSignature[state] = signatureHash;
-        stateSignatureCache[state] = signatureHash;
-      } else {
-        stateToSignature[state] = stateSignatureCache[state];
       }
     }
 
@@ -421,28 +416,34 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
 
     // split blocks according to their state signatures if possible
     auto wasSplit = partition.splitBlock(*blockToRefine, splitCondition,
-                                         [&blocksQueue, &stateSignatureCache, this](Block<BlockDataType> &newBlock) {
-                                              if (newBlock.getNumberOfStates() > 1) {
-                                                newBlock.data().setNeedsRefinement(true);
-                                                blocksQueue.push_back(&newBlock);
-                                              }
+                   [&blocksQueue, &statesWithInvalidSignature, this](Block<BlockDataType> &newBlock) {
+                        if (newBlock.getNumberOfStates() > 1) {
+                          newBlock.data().setNeedsRefinement(true);
+                          blocksQueue.push_back(&newBlock);
+                        }
 
-                                             // add dependent blocks (outgoing transitions from newBlock)
-                                             for (auto stateIt = partition.begin(newBlock), stateIte = partition.end(newBlock);
-                                                  stateIt != stateIte; ++stateIt) {
-                                               for (auto &transition: backwardTransitions.getRow(*stateIt)) {
-                                                 auto &targetBlock = partition.getBlock(transition.getColumn());
-                                                 // place target block on queue only if it is not already there
-                                                 if (!targetBlock.data().needsRefinement() && targetBlock.getNumberOfStates() > 1) {
-                                                   targetBlock.data().setNeedsRefinement(true);
-                                                   blocksQueue.push_back(&targetBlock);
-                                                 }
+                       // add dependent blocks (outgoing transitions from newBlock)
+                       for (auto stateIt = partition.begin(newBlock), stateIte = partition.end(newBlock);
+                            stateIt != stateIte; ++stateIt) {
+                         for (auto &transition: backwardTransitions.getRow(*stateIt)) {
+                           auto &targetBlock = partition.getBlock(transition.getColumn());
+                           // place target block on queue only if it is not already there
+                           if (!targetBlock.data().needsRefinement() && targetBlock.getNumberOfStates() > 1) {
+                             targetBlock.data().setNeedsRefinement(true);
+                             blocksQueue.push_back(&targetBlock);
+                           }
 
-                                                 // erase cache for dependent states
-                                                 stateSignatureCache.erase(transition.getColumn());
-                                               }
-                                             }
-                                         });
+                           // remember which states have an invalid signature now
+                           statesWithInvalidSignature.emplace_back(transition.getColumn());
+                         }
+                       }
+                   });
+
+    // invalidate signatures of affected states
+    for (auto currentState : statesWithInvalidSignature) {
+      stateToSignature.erase(currentState);
+    }
+    statesWithInvalidSignature.clear();
 
     if (!wasSplit) {
       noSplitCounter++;
@@ -476,10 +477,8 @@ storm::storage::bisimulation::Signature<typename ModelType::ValueType> Bisimulat
 
 template<typename ModelType, typename BlockDataType>
 std::size_t BisimulationDecomposition<ModelType, BlockDataType>::computeStateSignatureHash(
-        storm::storage::sparse::state_type state,
-        storm::storage::bisimulation::Partition<BlockDataType> const& currentPartition) const {
-
-  return std::hash<std::string>{}(computeStateSignature(state, partition).toString());
+        storm::storage::sparse::state_type state) const {
+  return computeStateSignature(state, partition).computeHash();
 }
 
 template<typename ModelType, typename BlockDataType>
