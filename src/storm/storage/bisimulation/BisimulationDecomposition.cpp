@@ -377,19 +377,19 @@ void BisimulationDecomposition<ModelType, BlockDataType>::initializeLabelBasedPa
 
 template<typename ModelType, typename BlockDataType>
 void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefinement() {
-  // insert all blocks into the queue for refinement
+  // Insert all blocks into the queue for refinement
   std::vector<Block<BlockDataType>*> blocksQueue;
   std::for_each(partition.getBlocks().begin(), partition.getBlocks().end(), [&](std::unique_ptr<Block<BlockDataType>> const& block) {
     block->data().setNeedsRefinement(true);
     blocksQueue.push_back(block.get());
   });
 
-  // refine the partition as long as the queue is not empty
+  std::vector<size_t> stateToSignature(backwardTransitions.getColumnCount(), 0);
+  std::vector<storm::storage::sparse::state_type> statesWithInvalidSignature;
+
+  // Refine the partition as long as the queue is not empty
   uint_fast64_t iterations = 0;
   uint_fast64_t noSplitCounter = 0;
-
-  std::unordered_map<storm::storage::sparse::state_type, std::size_t> stateToSignature;
-  std::vector<storm::storage::sparse::state_type> statesWithInvalidSignature;
   while (!blocksQueue.empty()) {
     ++iterations;
 
@@ -397,24 +397,50 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
     blocksQueue.pop_back();
     blockToRefine->data().setNeedsRefinement(false);
 
-    // map states to their signature
+    // Detect if splitting is necessary
+    size_t firstSignature = 0;
+    bool hasMultipleSignatures = false;
+    bool isFirstState = true;
+
+    // Map states to their signature
     for (auto stateIt = partition.begin(*blockToRefine), stateIte = partition.end(*blockToRefine);
          stateIt != stateIte; ++stateIt) {
       auto state = *stateIt;
-      // only compute the state signature if it was invalidated
-      if (stateToSignature.find(state) == stateToSignature.end()) {
+      // Only compute the state signature if it was invalidated
+      if (stateToSignature[state] == 0) {
         auto signatureHash = computeStateSignatureHash(state);
         stateToSignature[state] = signatureHash;
       }
+
+      // Compare signatures
+      if (isFirstState) {
+        firstSignature = stateToSignature[state];
+        isFirstState = false;
+      } else if (stateToSignature[state] != firstSignature) {
+        hasMultipleSignatures = true;
+      }
     }
 
-    // check for difference in the signature hashes
+    // Skip splitting if all states have the same signature
+    if (!hasMultipleSignatures) {
+      noSplitCounter++;
+      continue;
+    }
+
+    // Check for difference in the signature hashes
     auto splitCondition = [&stateToSignature](storm::storage::sparse::state_type a,
                                               storm::storage::sparse::state_type b) {
         return stateToSignature.at(a) < stateToSignature.at(b);
     };
 
-    // split blocks according to their state signatures if possible
+    // TODO: In this map we book keep if we really need to add the predecessorBlock to the queue again.
+    // Key -> ID of predecessor block, Value -> Vector including all IDs of newly created blocks by the split
+    // If for any of the predecessor blocks the vector has a length larger than one, then we need to add it to the
+    // working queue. This is, because the corresponding predecessor block then must be split again, as the previously
+    // executed split affects it.
+    // std::unordered_map<Block<BlockDataType>*, std::unordered_set<size_t>> blocksCreatedBySplit;
+
+    // split blocks according to their state signatures, if possible
     auto wasSplit = partition.splitBlock(*blockToRefine, splitCondition,
                    [&blocksQueue, &statesWithInvalidSignature, this](Block<BlockDataType> &newBlock) {
                         if (newBlock.getNumberOfStates() > 1) {
@@ -422,26 +448,51 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
                           blocksQueue.push_back(&newBlock);
                         }
 
-                       // add dependent blocks (outgoing transitions from newBlock)
+                       // add dependent blocks (incoming transitions to newBlock)
+                       // TODO: Get rid of these loops by optimization
                        for (auto stateIt = partition.begin(newBlock), stateIte = partition.end(newBlock);
                             stateIt != stateIte; ++stateIt) {
                          for (auto &transition: backwardTransitions.getRow(*stateIt)) {
-                           auto &targetBlock = partition.getBlock(transition.getColumn());
+                           auto predecessorState = transition.getColumn();
+                           auto &predecessorBlock = partition.getBlock(predecessorState);
+
+                           // TODO: Do all states in the predecessorBlock maybe have only transitions into one newly created block? If yes => the predecessorBlock must not be added to the queue
+                           // auto entryForPredecessorBlock = blocksCreatedBySplit.find(&predecessorBlock);
+                           // if (entryForPredecessorBlock != blocksCreatedBySplit.end()) {
+                           //   // found entry, place ID of newly created block
+                           //   entryForPredecessorBlock->second.insert(newBlock.getId());
+                           // } else {
+                           //   std::unordered_set<size_t> createdBlocks;
+                           //   createdBlocks.insert(newBlock.getId());
+                           //    blocksCreatedBySplit[&predecessorBlock] = createdBlocks;
+                           // }
+
                            // place target block on queue only if it is not already there
-                           if (!targetBlock.data().needsRefinement() && targetBlock.getNumberOfStates() > 1) {
-                             targetBlock.data().setNeedsRefinement(true);
-                             blocksQueue.push_back(&targetBlock);
+                           if (!predecessorBlock.data().needsRefinement() && predecessorBlock.getNumberOfStates() > 1) {
+                             predecessorBlock.data().setNeedsRefinement(true);
+                             blocksQueue.push_back(&predecessorBlock);
                            }
 
                            // remember which states have an invalid signature now
-                           statesWithInvalidSignature.emplace_back(transition.getColumn());
+                           statesWithInvalidSignature.emplace_back(predecessorState);
                          }
                        }
                    });
 
+    // TODO: Handle current block as well if you use additional book keeping
+
+    // for (const auto& pair : blocksCreatedBySplit) {
+    //   if (pair.second.size() > 1) {
+    //     if (pair.first->getNumberOfStates() > 1) {
+    //       blocksQueue.emplace_back(pair.first);
+    //       pair.first->data().setNeedsRefinement(true);
+    //     }
+    //   }
+    // }
+
     // invalidate signatures of affected states
     for (auto currentState : statesWithInvalidSignature) {
-      stateToSignature.erase(currentState);
+        stateToSignature[currentState] = 0;
     }
     statesWithInvalidSignature.clear();
 
@@ -482,6 +533,7 @@ std::size_t BisimulationDecomposition<ModelType, BlockDataType>::computeStateSig
   // TODO: When using --exact, the quotient gets calculated correctly. Thus, Boost does not guarantee a sufficient
   // TODO: precision for doubles
   return computeStateSignature(state, partition).computeHash();
+  // TODO: Using --exact with the string based hash representation does not lead to a correct quotient -> investigate
   // return std::hash<std::string>{}(computeStateSignature(state, partition).toString());
 }
 

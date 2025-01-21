@@ -180,10 +180,7 @@ template<typename DataType>
 void Partition<DataType>::sortRange(storm::storage::sparse::state_type beginIndex, storm::storage::sparse::state_type endIndex,
                                     std::function<bool(storm::storage::sparse::state_type, storm::storage::sparse::state_type)> const& less,
                                     bool updatePositions) {
-    // FIXME, TODO: Wrapping less argument in a lambda here, as clang and the GCC stdlib do not play nicely
-    // Pass 'less' directly to std::sort when this has been resolved (problem with clang 3.7, gcc 5.1)
-    std::sort(this->states.begin() + beginIndex, this->states.begin() + endIndex,
-              [&](const storm::storage::sparse::state_type& a, storm::storage::sparse::state_type& b) { return less(a, b); });
+    std::sort(this->states.begin() + beginIndex, this->states.begin() + endIndex, less);
 
     if (updatePositions) {
         mapStatesToPositions(this->states.begin() + beginIndex, this->states.begin() + endIndex);
@@ -233,7 +230,7 @@ std::pair<typename std::vector<std::unique_ptr<Block<DataType>>>::iterator, bool
     blocks.emplace_back(new Block<DataType>(block.getBeginIndex(), position, block.getPreviousBlockPointer(), &block, blocks.size()));
     auto newBlockIt = std::prev(blocks.end());
 
-    // Resize the current block appropriately.
+    // Resize the current block appropriately (it will be reused s.t. only one new block is required).
     block.setBeginIndex(position);
 
     // Update the mapping of the states in the newly created block.
@@ -247,11 +244,21 @@ bool Partition<DataType>::splitBlock(Block<DataType>& block,
                                      std::function<bool(storm::storage::sparse::state_type, storm::storage::sparse::state_type)> const& less,
                                      std::function<void(Block<DataType>&)> const& newBlockCallback) {
     // Sort the block, but leave the positions untouched.
-    this->sortBlock(block, less, false);
+    // This approach is efficient if we expect most of the attempted splits to work out, otherwise it would be better
+    // to first check if the `less` function differs for any pair of states.
+  auto sortStart = std::chrono::high_resolution_clock::now();
+
+  this->sortBlock(block, less, false);
+
+  auto sortEnd = std::chrono::high_resolution_clock::now();
+  auto sortDuration = std::chrono::duration_cast<std::chrono::milliseconds>(sortEnd - sortStart).count();
+
+   // std::cout << "Time for sortBlock: " << sortDuration << " ms" << std::endl;
 
     auto originalBegin = block.getBeginIndex();
     auto originalEnd = block.getEndIndex();
 
+    // it -> begin of current block, ite -> end of current block
     auto it = this->states.cbegin() + block.getBeginIndex();
     auto ite = this->states.cbegin() + block.getEndIndex();
 
@@ -260,13 +267,19 @@ bool Partition<DataType>::splitBlock(Block<DataType>& block,
     do {
         upperBound = std::upper_bound(it, ite, *it, less);
 
+        // Check if point to split was found
         if (upperBound != ite) {
             wasSplit = true;
             auto result = this->splitBlock(block, std::distance(this->states.cbegin(), upperBound));
-            newBlockCallback(**result.first);
+            // Do not invoke callback function in edge case where no new block is created
+            if (result.second) {
+              newBlockCallback(**result.first);
+            }
         }
         it = upperBound;
     } while (upperBound != ite);
+
+    // std::cout << "While wasSplit is " << wasSplit << std::endl;
 
     // Finally, repair the positions mapping.
     mapStatesToPositions(this->states.begin() + originalBegin, this->states.begin() + originalEnd);
