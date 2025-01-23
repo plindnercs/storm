@@ -449,7 +449,6 @@ void BisimulationDecomposition<ModelType, BlockDataType>::performSignatureRefine
                         }
 
                        // add dependent blocks (incoming transitions to newBlock)
-                       // TODO: Get rid of these loops by optimization
                        for (auto stateIt = partition.begin(newBlock), stateIte = partition.end(newBlock);
                             stateIt != stateIte; ++stateIt) {
                          for (auto &transition: backwardTransitions.getRow(*stateIt)) {

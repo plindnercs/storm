@@ -243,17 +243,18 @@ template<typename DataType>
 bool Partition<DataType>::splitBlock(Block<DataType>& block,
                                      std::function<bool(storm::storage::sparse::state_type, storm::storage::sparse::state_type)> const& less,
                                      std::function<void(Block<DataType>&)> const& newBlockCallback) {
+    // DEBUG
+    auto sortStart = std::chrono::high_resolution_clock::now();
+
     // Sort the block, but leave the positions untouched.
     // This approach is efficient if we expect most of the attempted splits to work out, otherwise it would be better
     // to first check if the `less` function differs for any pair of states.
-  auto sortStart = std::chrono::high_resolution_clock::now();
+    this->sortBlock(block, less, false);
 
-  this->sortBlock(block, less, false);
-
-  auto sortEnd = std::chrono::high_resolution_clock::now();
-  auto sortDuration = std::chrono::duration_cast<std::chrono::milliseconds>(sortEnd - sortStart).count();
-
-   // std::cout << "Time for sortBlock: " << sortDuration << " ms" << std::endl;
+    // DEBUG
+    auto sortEnd = std::chrono::high_resolution_clock::now();
+    auto sortDuration = std::chrono::duration_cast<std::chrono::milliseconds>(sortEnd - sortStart).count();
+    // std::cout << "Time for sortBlock: " << sortDuration << " ms" << std::endl;
 
     auto originalBegin = block.getBeginIndex();
     auto originalEnd = block.getEndIndex();
@@ -279,6 +280,7 @@ bool Partition<DataType>::splitBlock(Block<DataType>& block,
         it = upperBound;
     } while (upperBound != ite);
 
+    // DEBUG
     // std::cout << "While wasSplit is " << wasSplit << std::endl;
 
     // Finally, repair the positions mapping.
